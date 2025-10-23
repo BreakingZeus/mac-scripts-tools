@@ -1,0 +1,170 @@
+#!/bin/bash
+
+# Function to install swiftDialog if not already installed
+function dialogInstall() {
+
+    # Get the URL of the latest PKG From the Dialog GitHub repo
+    dialogURL=$(curl -L --silent --fail "https://api.github.com/repos/swiftDialog/swiftDialog/releases/latest" | awk -F '"' "/browser_download_url/ && /pkg\"/ { print \$4; exit }")
+
+    # Expected Team ID of the downloaded PKG
+    expectedDialogTeamID="PWA5E9TQ59"
+
+    echo "PRE-FLIGHT CHECK: Installing swiftDialog..."
+
+    # Create temporary working directory
+    workDirectory=$( /usr/bin/basename "$0" )
+    tempDirectory=$( /usr/bin/mktemp -d "/private/tmp/$workDirectory.XXXXXX" )
+
+    # Download the installer package
+    /usr/bin/curl --location --silent "$dialogURL" -o "$tempDirectory/Dialog.pkg"
+
+    # Verify the download
+    teamID=$(/usr/sbin/spctl -a -vv -t install "$tempDirectory/Dialog.pkg" 2>&1 | awk '/origin=/ {print $NF }' | tr -d '()')
+
+    # Install the package if Team ID validates
+    if [[ "$expectedDialogTeamID" == "$teamID" ]]; then
+
+        /usr/sbin/installer -pkg "$tempDirectory/Dialog.pkg" -target /
+        sleep 2
+        dialogVersion=$( /usr/local/bin/dialog --version )
+        echo "PRE-FLIGHT CHECK: swiftDialog version ${dialogVersion} installed; proceeding..."
+
+    else
+
+        # Display a so-called "simple" dialog if Team ID fails to validate
+        osascript -e 'display dialog "Please advise your Support Representative of the following error:\r\r• Dialog Team ID verification failed\r\r" with title "Setup Your Mac: Error" buttons {"Close"} with icon caution'
+        exit 1
+
+    fi
+
+    # Remove the temporary working directory when done
+    /bin/rm -Rf "$tempDirectory"
+}
+
+# Function to check and install swiftDialog if necessary
+function dialogCheck() {
+
+    echo "PRE-FLIGHT CHECK: Checking swiftDialog installation..."
+
+    # Check for Dialog and install if not found
+    if [ ! -e "/Library/Application Support/Dialog/Dialog.app" ]; then
+
+        echo "PRE-FLIGHT CHECK: swiftDialog not found. Installing..."
+        dialogInstall
+
+    else
+
+        dialogVersion=$(/usr/local/bin/dialog --version)
+        if [[ "${dialogVersion}" < "${swiftDialogMinimumRequiredVersion}" ]]; then
+            
+            echo "PRE-FLIGHT CHECK: swiftDialog version ${dialogVersion} found but swiftDialog ${swiftDialogMinimumRequiredVersion} or newer is required; updating..."
+            dialogInstall
+            
+        else
+
+            echo "PRE-FLIGHT CHECK: swiftDialog version ${dialogVersion} found; proceeding..."
+
+        fi
+    
+    fi
+}
+
+# Function to prompt user for input using swiftDialog
+get_user_input() {
+    /usr/local/bin/dialog --json \
+        --title "Isenberg On Boarding" \
+        --message "Hi there! We'd love to get to know you better. Please share your first and last name, along with your department, so we can personalize your experience. Thank you!" \
+        --messagedfont 14 \
+        --bannerimage "/Library/ISOM_Branding/isenbergPattern.jpg" \
+        --icon "/Library/ISOM_Branding/isenberg_i.png" \
+        --iconsize 200 \
+        --width 800 \
+        --height 800 \
+        --blurscreen \
+        --ontop \
+        --textfield "First Name,required" \
+        --textfield "Last Name,required" \
+        --selecttitle "Department,required" \
+        --selectvalues "Accounting,Administrative Resources,Berthiaume Program,Business Communication,Chase Career Center,Deans Office,Development,Finance,Graduate Office,Hotel & Tourism Management,Management,Marketing & Communications,Marketing,MSBDC,OIM,PhD,Sports Management,Technology Support Services" \
+        --button1text "Submit" \
+        --button2text "" > /Library/ISOM_Branding/userOutput.json
+
+    response=$?
+    if [ $response -eq 0 ]; then
+        user_input=$(< /Library/ISOM_Branding/userOutput.json)
+        FIRST_NAME=$(echo "$user_input" | awk -F '["]' '/"First Name"/ {print $4}')
+        LAST_NAME=$(echo "$user_input" | awk -F '["]' '/"Last Name"/ {print $4}')
+        DEPARTMENT=$(echo "$user_input" | awk -F '["]' '/"SelectedOption"/ {print $4}')
+    else
+        echo "User cancelled the input."
+        exit 1
+    fi
+}
+
+# Function to find abbreviation for selected department
+find_abbreviation() {
+    local department="$1"
+    for entry in "${departments[@]}"; do
+        IFS=":" read -r name abbrev <<< "$entry"
+        if [[ "$name" == "$department" ]]; then
+            echo "$abbrev"
+            return
+        fi
+    done
+    echo ""
+}
+
+# Function to set computer name
+set_computer_name() {
+    DEPARTMENT=$1
+    FIRST_NAME=$2
+    LAST_NAME=$3
+
+    # Define indexed array with department names and abbreviations
+    departments=(
+    'Accounting:ACCT'
+    'Administrative Resources:STAFF'
+    'Berthiaume Program:BERT'
+    'Business Communication:BCC'
+    'Chase Career Center:CHASE'
+    'Deans Office:DEAN'
+    'Development:DEV'
+    'Finance:FIN'
+    'Graduate Office:GRAD'
+    'Hotel & Tourism Management:HTM'
+    'Management:MGT'
+    'Marketing & Communications:MC'
+    'Marketing:MKT'
+    'MSBDC:MSBDC'
+    'OIM:OIM'
+    'PhD:PhD'
+    'Sports Management:SPRT'
+    'Technology Support Services:TSS'
+)
+
+    # Find abbreviation for selected department
+    DEPARTMENT_ABBREV=$(find_abbreviation "$DEPARTMENT")
+
+    # Ensure department abbreviation is found
+    if [[ -z "$DEPARTMENT_ABBREV" ]]; then
+        echo "Error: Department abbreviation not found for '$DEPARTMENT'."
+        exit 1
+    fi
+
+    # Create computer name with lowercase initials
+    COMPUTER_NAME="ISOM-${DEPARTMENT_ABBREV}$(echo "${FIRST_NAME:0:1}" | tr '[:upper:]' '[:lower:]')$(echo "${LAST_NAME:0:1}" | tr '[:upper:]' '[:lower:]')"
+
+    # Set the computer name
+    echo "Setting computer name to: $COMPUTER_NAME"
+    sudo scutil --set ComputerName "$COMPUTER_NAME"
+    sudo scutil --set LocalHostName "$COMPUTER_NAME"
+    sudo scutil --set HostName "$COMPUTER_NAME"
+    dscacheutil -flushcache
+}
+
+# Main script flow
+install_swiftDialog  # Replace with actual installation logic if needed
+get_user_input
+set_computer_name "$DEPARTMENT" "$FIRST_NAME" "$LAST_NAME"
+
+echo "User input has been gathered successfully and computer name has been set."
