@@ -1,0 +1,88 @@
+#!/bin/bash
+
+LOG_FILE="/var/log/foxit_addin_cleanup.log"
+KILL_OFFICE="${4:-false}"   # Use parameter 4 if provided, default to "false" (skip killing Office apps)
+
+timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
+log() { echo "$(timestamp) $*" | tee -a "$LOG_FILE"; }
+
+# Optionally kill Office apps if KILL_OFFICE is true, with a user warning pop-up
+if [ "$KILL_OFFICE" = "true" ]; then
+    log "KILL_OFFICE is true; preparing to warn user and terminate Office apps"
+    
+    # Get the current logged-in user (console user)
+    CURRENT_USER=$(stat -f "%Su" /dev/console)
+    if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+        log "Displaying warning pop-up to user: $CURRENT_USER (will proceed after 30 seconds if no response)"
+        # Run osascript as the current user to show a dialog with 30-second timeout
+        su -l "$CURRENT_USER" -c "osascript -e 'display dialog \"Please save any open documents in Microsoft Word, Excel, or PowerPoint. These applications will be closed in 30 seconds for maintenance.\" buttons {\"OK\"} with title \"Save Your Work\" giving up after 30'" 2>>"$LOG_FILE" && \
+            log "Pop-up displayed to user (user responded or timed out)" || \
+            log "Failed to display pop-up to user, proceeding anyway"
+    else
+        log "No logged-in user found or user is root; skipping pop-up and proceeding"
+    fi
+    
+    # No additional sleep needed since the dialog timeout handles the wait; proceed directly to kill
+    log "Proceeding with Office app termination after pop-up or timeout"
+    
+    # Proceed with killing Office apps regardless of user response or timeout
+    for APP in "Microsoft Word" "Microsoft Excel" "Microsoft PowerPoint"; do
+        pkill -x "$APP" && log "Closed $APP" || log "No running instance of $APP"
+    done
+else
+    log "Skipping Office app termination (KILL_OFFICE=false)"
+fi
+
+# Helper: remove Foxit files in a given Startup dir
+clean_startup_dir() {
+    local startup_dir="$1"
+    if [ -d "$startup_dir" ]; then
+        # Remove any likely Foxit add-in names (case-insensitive)
+        /usr/bin/find "$startup_dir" -maxdepth 1 -type f \
+            \( -iname "foxit*.dotm" -o -iname "foxit*.ppam" -o -iname "foxit*.xla" -o -iname "foxit*.xlam" \) \
+            -print -exec rm -f {} \; 2>>"$LOG_FILE" | while read -r removed; do
+                log "Removed: $removed"
+            done
+    fi
+}
+
+# Iterate over local user homes
+for USER_HOME in /Users/*; do
+    [ ! -d "$USER_HOME" ] && continue
+    USER_NAME="$(basename "$USER_HOME")"
+    case "$USER_NAME" in
+        Shared|Guest|.localized) continue ;;
+    esac
+
+    # Check possible Office startup paths
+    POSSIBLE_PATHS=(
+        "$USER_HOME/Library/Group Containers/UBF8T346G9.office/User Content.localized/Startup.localized"
+        "$USER_HOME/Library/Group Containers/UBF8T346G9.office/User Content/Startup"
+        "$USER_HOME/Library/Group Containers/UBF8T346G9.office/User Content.localized/Startup"
+        "$USER_HOME/Library/Group Containers/UBF8T346G9.office/User Content/Startup.localized"
+    )
+    GC_PATH=""
+    for path in "${POSSIBLE_PATHS[@]}"; do
+        if [ -d "$path" ]; then
+            GC_PATH="$path"
+            break
+        fi
+    done
+
+    if [ -n "$GC_PATH" ]; then
+        log "Scanning for $USER_NAME at: $GC_PATH"
+        for app in "Word" "word" "Excel" "excel" "PowerPoint" "powerpoint"; do
+            clean_startup_dir "$GC_PATH/$app"
+        done
+    else
+        log "Startup path not found for $USER_NAME"
+    fi
+
+    # Fix ownership if we modified any files or directories
+    if id "$USER_NAME" >/dev/null 2>&1; then
+        chown -R "$USER_NAME" "$USER_HOME/Library/Group Containers/UBF8T346G9.office" 2>>"$LOG_FILE" || log "Failed to adjust ownership for $USER_NAME"
+    fi
+done
+
+log "Foxit Office add-in cleanup complete."
+exit 0
