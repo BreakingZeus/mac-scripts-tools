@@ -1,0 +1,65 @@
+#!/usr/bin/osascript
+
+-- Define the list of departments and their abbreviations
+set departmentData to {¬
+    {"Accounting", "ACCT"}, ¬
+    {"Administrative Resources", "STAFF"}, ¬
+    {"Berthiaume Program", "BERT"}, ¬
+    {"Business Communication", "BCC"}, ¬
+    {"Chase Career Center", "CHASE"}, ¬
+    {"Dean's Office", "DEAN"}, ¬
+    {"Development", "DEV"}, ¬
+    {"Finance", "FIN"}, ¬
+    {"Graduate Office", "GRAD"}, ¬
+    {"Hotel & Tourism Management", "HTM"}, ¬
+    {"Marketing & Communications", "MC"}, ¬
+    {"Marketing", "MKT"}, ¬
+    {"MSBDC", "MSBDC"}, ¬
+    {"OIM", "OIM"}, ¬
+    {"PhD", "PhD"}, ¬
+    {"Sports Management", "SPRT"}, ¬
+    {"Technology Support Services", "TSS"}}
+
+-- Create a list of department names for the user to choose from
+set departmentNames to {}
+repeat with i from 1 to count of departmentData
+    set end of departmentNames to item 1 of item i of departmentData
+end repeat
+
+-- Activate System Events to bring dialogs to the front
+tell application "System Events" to activate
+
+-- Ask the user to select a department from the list
+set selectedDepartmentName to choose from list departmentNames with prompt "Hello, Please select your department from the list below!" without multiple selections allowed and empty selection allowed
+
+if selectedDepartmentName is false then
+    display dialog "Hello, Please select your department from the list below!" buttons {"Next"} default button "OK" with icon 1
+    return
+end if
+
+-- Get the corresponding abbreviation for the selected department
+set selectedDepartment to item 1 of selectedDepartmentName
+set departmentAbbreviation to ""
+repeat with i from 1 to count of departmentData
+    if item 1 of item i of departmentData is selectedDepartment then
+        set departmentAbbreviation to item 2 of item i of departmentData
+        exit repeat
+    end if
+end repeat
+
+-- Ask the user for their first name and last name
+set firstName to text returned of (display dialog "Enter your first name:" default answer "")
+set lastName to text returned of (display dialog "Enter your last name:" default answer "")
+
+-- Create the computer name
+set firstNameInitial to character 1 of firstName
+set lastNameInitial to character 1 of lastName
+set computerName to "ISOM-" & departmentAbbreviation & firstNameInitial & lastNameInitial
+
+-- Set the computer name
+do shell script "sudo scutil --set ComputerName " & quoted form of computerName with administrator privileges
+do shell script "sudo scutil --set HostName " & quoted form of computerName with administrator privileges
+do shell script "sudo scutil --set LocalHostName " & quoted form of computerName with administrator privileges
+
+-- Display a confirmation message
+display dialog "Computer name has been set to " & computerName with title "Computer Name Set"
