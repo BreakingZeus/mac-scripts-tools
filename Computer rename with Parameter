@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Jamf script parameter $4 is used for the new computer name
+NEW_NAME="$4"
+
+# Validate input
+if [[ -z "$NEW_NAME" ]]; then
+  echo "Error: No computer name provided. Please pass the name as Parameter 4 in Jamf."
+  exit 1
+fi
+
+# Set the names
+scutil --set ComputerName "$NEW_NAME"
+scutil --set HostName "$NEW_NAME"
+scutil --set LocalHostName "$NEW_NAME"
+
+# Set NetBIOS name for SMB (optional)
+defaults write /Library/Preferences/SystemConfiguration/com.apple.smb.server NetBIOSName -string "$NEW_NAME"
+
+echo "Computer name successfully set to: $NEW_NAME"
+
+exit 0
